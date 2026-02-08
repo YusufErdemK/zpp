@@ -117,7 +117,7 @@ if [ -f "$INSTALL_PATH" ] && [ -x "$INSTALL_PATH" ]; then
     fi
     
     echo -e "${PURPLE}╔════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║   Ready to code with Z++! 🚀          ║${NC}"
+    echo -e "${PURPLE}║   Ready to code with Z++! 🚀           ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════╝${NC}\n"
     
 else
