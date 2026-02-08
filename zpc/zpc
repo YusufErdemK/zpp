@@ -8,9 +8,16 @@ Version: 1.0.0
 import sys
 import re
 import os
+import json
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
+
+try:
+    import curses
+    CURSES_AVAILABLE = True
+except ImportError:
+    CURSES_AVAILABLE = False
 
 
 class TokenType(Enum):
@@ -93,6 +100,299 @@ class JSStatement:
         """JavaScript string'e çevir"""
         indent_str = "    " * indent
         return f"{indent_str}{self.code}"
+
+
+@dataclass
+class CompilerConfig:
+    """Derleyici konfigürasyonu"""
+    minify_html: bool = False
+    minify_css: bool = False
+    minify_js: bool = False
+    output_format: str = "html"  # html, html5, xhtml
+    indent_size: int = 4
+    add_comments: bool = True
+    target_browser: str = "modern"  # modern, legacy, all
+    optimize_images: bool = False
+    bundle_assets: bool = False
+    
+    def to_dict(self) -> Dict:
+        """Config'i dictionary'e çevir"""
+        return {
+            'minify_html': self.minify_html,
+            'minify_css': self.minify_css,
+            'minify_js': self.minify_js,
+            'output_format': self.output_format,
+            'indent_size': self.indent_size,
+            'add_comments': self.add_comments,
+            'target_browser': self.target_browser,
+            'optimize_images': self.optimize_images,
+            'bundle_assets': self.bundle_assets
+        }
+    
+    @staticmethod
+    def from_dict(data: Dict) -> 'CompilerConfig':
+        """Dictionary'den config oluştur"""
+        return CompilerConfig(
+            minify_html=data.get('minify_html', False),
+            minify_css=data.get('minify_css', False),
+            minify_js=data.get('minify_js', False),
+            output_format=data.get('output_format', 'html'),
+            indent_size=data.get('indent_size', 4),
+            add_comments=data.get('add_comments', True),
+            target_browser=data.get('target_browser', 'modern'),
+            optimize_images=data.get('optimize_images', False),
+            bundle_assets=data.get('bundle_assets', False)
+        )
+    
+    def save(self, filepath: str):
+        """Config'i dosyaya kaydet"""
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+    
+    @staticmethod
+    def load(filepath: str) -> Optional['CompilerConfig']:
+        """Dosyadan config yükle"""
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return CompilerConfig.from_dict(data)
+        except Exception:
+            return None
+
+
+class ConfigMenu:
+    """Interaktif konfigürasyon menüsü"""
+    
+    def __init__(self):
+        self.config = CompilerConfig()
+        self.menu_items = [
+            {
+                'name': 'HTML Minify',
+                'key': 'minify_html',
+                'type': 'bool',
+                'description': 'HTML çıktısını küçült (boşlukları kaldır)'
+            },
+            {
+                'name': 'CSS Minify',
+                'key': 'minify_css',
+                'type': 'bool',
+                'description': 'CSS çıktısını küçült'
+            },
+            {
+                'name': 'JS Minify',
+                'key': 'minify_js',
+                'type': 'bool',
+                'description': 'JavaScript çıktısını küçült'
+            },
+            {
+                'name': 'Çıktı Formatı',
+                'key': 'output_format',
+                'type': 'select',
+                'options': ['html', 'html5', 'xhtml'],
+                'description': 'HTML çıktı formatı'
+            },
+            {
+                'name': 'Girinti Boyutu',
+                'key': 'indent_size',
+                'type': 'number',
+                'min': 2,
+                'max': 8,
+                'description': 'Kod girintisi (boşluk sayısı)'
+            },
+            {
+                'name': 'Yorum Ekle',
+                'key': 'add_comments',
+                'type': 'bool',
+                'description': 'Çıktıya açıklama yorumları ekle'
+            },
+            {
+                'name': 'Hedef Tarayıcı',
+                'key': 'target_browser',
+                'type': 'select',
+                'options': ['modern', 'legacy', 'all'],
+                'description': 'Hedef tarayıcı desteği'
+            },
+            {
+                'name': 'Görsel Optimizasyonu',
+                'key': 'optimize_images',
+                'type': 'bool',
+                'description': 'Görselleri optimize et'
+            },
+            {
+                'name': 'Asset Birleştirme',
+                'key': 'bundle_assets',
+                'type': 'bool',
+                'description': 'CSS/JS dosyalarını birleştir'
+            }
+        ]
+        self.current_index = 0
+    
+    def run_curses(self, stdscr):
+        """Curses tabanlı menü"""
+        curses.curs_set(0)  # Cursor'u gizle
+        stdscr.clear()
+        
+        # Renkleri başlat
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)  # Seçili
+        curses.init_pair(2, curses.COLOR_CYAN, curses.COLOR_BLACK)   # Başlık
+        curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)  # Aktif
+        curses.init_pair(4, curses.COLOR_YELLOW, curses.COLOR_BLACK) # Açıklama
+        
+        while True:
+            stdscr.clear()
+            height, width = stdscr.getmaxyx()
+            
+            # Başlık
+            title = "╔═══ ZPC Derleyici Konfigürasyonu ═══╗"
+            stdscr.addstr(0, (width - len(title)) // 2, title, curses.color_pair(2) | curses.A_BOLD)
+            
+            # Menü öğeleri
+            start_y = 3
+            for idx, item in enumerate(self.menu_items):
+                y = start_y + idx * 2
+                
+                if y >= height - 5:
+                    break
+                
+                # Seçili öğe vurgusu
+                if idx == self.current_index:
+                    attr = curses.color_pair(1) | curses.A_BOLD
+                else:
+                    attr = curses.A_NORMAL
+                
+                # Öğe adı
+                name = f" {item['name']}: "
+                stdscr.addstr(y, 2, name, attr)
+                
+                # Değer
+                value_x = 2 + len(name)
+                value = self._get_value_string(item)
+                
+                if idx == self.current_index:
+                    stdscr.addstr(y, value_x, value, curses.color_pair(3) | curses.A_BOLD)
+                else:
+                    stdscr.addstr(y, value_x, value, curses.A_NORMAL)
+                
+                # Açıklama
+                if idx == self.current_index and y + 1 < height - 5:
+                    desc = f"  ↳ {item['description']}"
+                    stdscr.addstr(y + 1, 2, desc, curses.color_pair(4))
+            
+            # Alt bilgi
+            help_y = height - 3
+            help_text = "↑↓: Gezin | ←→/Space: Değiştir | Enter: Kaydet | Q: Çıkış"
+            stdscr.addstr(help_y, (width - len(help_text)) // 2, help_text, curses.color_pair(4))
+            
+            stdscr.refresh()
+            
+            # Klavye girdisi
+            key = stdscr.getch()
+            
+            if key == curses.KEY_UP and self.current_index > 0:
+                self.current_index -= 1
+            elif key == curses.KEY_DOWN and self.current_index < len(self.menu_items) - 1:
+                self.current_index += 1
+            elif key in [curses.KEY_RIGHT, curses.KEY_LEFT, ord(' ')]:
+                self._toggle_value(key == curses.KEY_RIGHT or key == ord(' '))
+            elif key == ord('\n'):  # Enter
+                return True
+            elif key in [ord('q'), ord('Q')]:
+                return False
+    
+    def _get_value_string(self, item: Dict) -> str:
+        """Değeri string olarak döndür"""
+        value = getattr(self.config, item['key'])
+        
+        if item['type'] == 'bool':
+            return "[✓] Açık" if value else "[ ] Kapalı"
+        elif item['type'] == 'select':
+            options = item['options']
+            current = options.index(value)
+            return f"< {value} > ({current + 1}/{len(options)})"
+        elif item['type'] == 'number':
+            return f"< {value} >"
+        
+        return str(value)
+    
+    def _toggle_value(self, increase: bool = True):
+        """Değeri değiştir"""
+        item = self.menu_items[self.current_index]
+        current_value = getattr(self.config, item['key'])
+        
+        if item['type'] == 'bool':
+            setattr(self.config, item['key'], not current_value)
+        elif item['type'] == 'select':
+            options = item['options']
+            current_idx = options.index(current_value)
+            if increase:
+                new_idx = (current_idx + 1) % len(options)
+            else:
+                new_idx = (current_idx - 1) % len(options)
+            setattr(self.config, item['key'], options[new_idx])
+        elif item['type'] == 'number':
+            min_val = item.get('min', 0)
+            max_val = item.get('max', 100)
+            new_val = current_value + (1 if increase else -1)
+            new_val = max(min_val, min(max_val, new_val))
+            setattr(self.config, item['key'], new_val)
+    
+    def run_simple(self) -> bool:
+        """Basit text-based menü (curses yoksa)"""
+        print("\n╔═══════════════════════════════════════╗")
+        print("║  ZPC Derleyici Konfigürasyonu        ║")
+        print("╚═══════════════════════════════════════╝\n")
+        
+        for idx, item in enumerate(self.menu_items, 1):
+            value = getattr(self.config, item['key'])
+            print(f"{idx}. {item['name']}")
+            print(f"   Mevcut: {value}")
+            print(f"   {item['description']}")
+            
+            if item['type'] == 'bool':
+                choice = input("   Değiştir? (e/h): ").strip().lower()
+                if choice == 'e':
+                    setattr(self.config, item['key'], not value)
+            elif item['type'] == 'select':
+                print(f"   Seçenekler: {', '.join(item['options'])}")
+                choice = input(f"   Yeni değer [{value}]: ").strip()
+                if choice and choice in item['options']:
+                    setattr(self.config, item['key'], choice)
+            elif item['type'] == 'number':
+                try:
+                    choice = input(f"   Yeni değer [{value}]: ").strip()
+                    if choice:
+                        new_val = int(choice)
+                        min_val = item.get('min', 0)
+                        max_val = item.get('max', 100)
+                        if min_val <= new_val <= max_val:
+                            setattr(self.config, item['key'], new_val)
+                except ValueError:
+                    pass
+            
+            print()
+        
+        save = input("Ayarları kaydet? (e/h): ").strip().lower()
+        return save == 'e'
+    
+    def run(self) -> Optional[CompilerConfig]:
+        """Menüyü çalıştır"""
+        if CURSES_AVAILABLE:
+            try:
+                result = curses.wrapper(self.run_curses)
+                if result:
+                    return self.config
+                return None
+            except Exception as e:
+                print(f"⚠️  Curses hatası: {e}")
+                print("Basit moda geçiliyor...\n")
+                if self.run_simple():
+                    return self.config
+                return None
+        else:
+            print("⚠️  Curses kütüphanesi bulunamadı. Basit mod kullanılıyor.\n")
+            if self.run_simple():
+                return self.config
+            return None
 
 
 class Lexer:
@@ -371,8 +671,9 @@ class Parser:
 class CodeGenerator:
     """HTML/CSS/JS kod üreteci"""
     
-    def __init__(self, parser: Parser):
+    def __init__(self, parser: Parser, config: Optional[CompilerConfig] = None):
         self.parser = parser
+        self.config = config or CompilerConfig()
         self.html_output = ""
     
     def generate(self) -> str:
@@ -386,6 +687,9 @@ class CodeGenerator:
         html.append('    <meta charset="UTF-8">')
         html.append('    <meta name="viewport" content="width=device-width, initial-scale=1.0">')
         html.append("    <title>Z++ App</title>")
+        
+        if self.config.add_comments:
+            html.append("    <!-- Generated by ZPC - Z++ Compiler v1.0.0 -->")
         
         # CSS ekle
         if self.parser.css_rules:
@@ -405,6 +709,8 @@ class CodeGenerator:
         if self.parser.js_statements:
             html.append("")
             html.append("    <script>")
+            if self.config.add_comments:
+                html.append("        // Z++ JavaScript Code")
             for stmt in self.parser.js_statements:
                 html.append(stmt.to_js(indent=2))
             html.append("    </script>")
@@ -413,13 +719,29 @@ class CodeGenerator:
         html.append("</html>")
         
         self.html_output = "\n".join(html)
+        
+        # Minify işlemleri (basit versiyon)
+        if self.config.minify_html:
+            self.html_output = self._minify_html(self.html_output)
+        
         return self.html_output
+    
+    def _minify_html(self, html: str) -> str:
+        """Basit HTML minify"""
+        # Çok basit bir minify - boşlukları azalt
+        lines = html.split('\n')
+        minified = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped:
+                minified.append(stripped)
+        return ''.join(minified)
 
 
 class ZppCompiler:
     """Ana derleyici sınıfı"""
     
-    def __init__(self, source_file: str):
+    def __init__(self, source_file: str, config: Optional[CompilerConfig] = None):
         self.source_file = source_file
         self.source_code = ""
         self.parser: Optional[Parser] = None
@@ -427,6 +749,7 @@ class ZppCompiler:
         self.output_file = ""
         self.errors: List[str] = []
         self.warnings: List[str] = []
+        self.config = config or CompilerConfig()
     
     def compile(self) -> bool:
         """Derleme sürecini başlat"""
@@ -504,7 +827,7 @@ class ZppCompiler:
             self.errors.append("Parser başlatılmamış")
             return False
         
-        self.generator = CodeGenerator(self.parser)
+        self.generator = CodeGenerator(self.parser, self.config)
         try:
             self.generator.generate()
             return True
@@ -561,14 +884,48 @@ def print_usage():
 Kullanım:
     zpc <dosya.zpp>              Tek dosya derle
     zpc <dosya.zpp> -v           Detaylı çıktı ile derle
+    zpc <dosya.zpp> --make-config Konfigürasyon oluştur
     zpc --help                   Bu yardım mesajını göster
     zpc --version                Versiyon bilgisi
 
 Örnekler:
     zpc app.zpp                  app.zpp dosyasını derler
     zpc myproject.zpp -v         Detaylı mod ile derler
+    zpc app.zpp --make-config    Derleme ayarlarını yapılandır
 """
     print(usage)
+
+
+def handle_config_creation(source_file: str) -> Optional[CompilerConfig]:
+    """Konfigürasyon oluşturma işlemini yönet"""
+    print(f"🔧 '{source_file}' için konfigürasyon oluşturuluyor...\n")
+    
+    menu = ConfigMenu()
+    config = menu.run()
+    
+    if config:
+        # Config dosyasını kaydet
+        config_file = source_file.replace('.zpp', '.zpc.json')
+        config.save(config_file)
+        
+        print(f"\n✅ Konfigürasyon kaydedildi: {config_file}")
+        print("\n📋 Ayarlar:")
+        print(f"   HTML Minify: {'Açık' if config.minify_html else 'Kapalı'}")
+        print(f"   CSS Minify: {'Açık' if config.minify_css else 'Kapalı'}")
+        print(f"   JS Minify: {'Açık' if config.minify_js else 'Kapalı'}")
+        print(f"   Çıktı Formatı: {config.output_format}")
+        print(f"   Girinti: {config.indent_size} boşluk")
+        print(f"   Yorumlar: {'Açık' if config.add_comments else 'Kapalı'}")
+        print(f"   Hedef Tarayıcı: {config.target_browser}")
+        
+        # Şimdi derlemek isteyip istemediğini sor
+        compile_now = input("\nŞimdi derlemek ister misiniz? (e/h): ").strip().lower()
+        if compile_now == 'e':
+            return config
+    else:
+        print("\n❌ Konfigürasyon oluşturma iptal edildi.")
+    
+    return None
 
 
 def main():
@@ -587,12 +944,11 @@ def main():
         sys.exit(0)
     
     # Versiyon
-    if sys.argv[1] in ['--version', '-v']:
+    if sys.argv[1] in ['--version', '-V']:
         print_banner()
         sys.exit(0)
     
     input_file = sys.argv[1]
-    verbose = '-v' in sys.argv or '--verbose' in sys.argv
     
     # Dosya kontrolü
     if not os.path.exists(input_file):
@@ -603,14 +959,29 @@ def main():
         print("❌ Hata: Sadece .zpp dosyaları derlenebilir!")
         sys.exit(1)
     
+    # Config oluşturma modu
+    if '--make-config' in sys.argv:
+        config = handle_config_creation(input_file)
+        if not config:
+            sys.exit(0)
+    else:
+        # Mevcut config'i yükle
+        config_file = input_file.replace('.zpp', '.zpc.json')
+        config = CompilerConfig.load(config_file)
+        
+        if not config:
+            config = CompilerConfig()  # Varsayılan ayarlar
+    
+    verbose = '-v' in sys.argv or '--verbose' in sys.argv
+    
     # Banner
-    if verbose:
+    if verbose or '--make-config' in sys.argv:
         print_banner()
     
     print(f"🔧 Derleniyor: {input_file}")
     
     # Derle
-    compiler = ZppCompiler(input_file)
+    compiler = ZppCompiler(input_file, config)
     success = compiler.compile()
     
     # Sonuçları göster
