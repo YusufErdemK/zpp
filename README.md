@@ -47,9 +47,12 @@ class zpp {
     }
 ```
 
-| Z++ Code Example | Z++ App Output |
-|------------------|---------------|
-| <img src="assets/code_example.png" width="100%"> | <img src="assets/hello_world.png" width="100%"> |
+<h2 align="center" style="font-weight: bold; margin-top: 20px; margin-bottom: -1px;">Z++ Code Example</h2>
+
+|  |  |
+|--|--|
+| <img src="assets/code_example.png" width="848"> | <img src="assets/hello_world.png" width="900"> |
+
 
 
 These codes defines a simple Z++ class with a constructor and a method to run the application. The `@app` block contains methods for running the app and defining CSS styles.
