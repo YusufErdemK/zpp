@@ -100,3 +100,7 @@ zpc your_app.zpp
 
 ## LICENSE
 Z++ is licensed under the <b>GNU General Public License v3.0</b>. See the [LICENSE](LICENSE) file for more details.
+
+[![Stars](https://img.shields.io/github/stars/YusufErdemK/zpp?style=social)](https://github.com/YusufErdemK/zpp/stargazers)
+[![Forks](https://img.shields.io/github/forks/YusufErdemK/zpp?style=social)](https://github.com/YusufErdemK/zpp/network/members)
+[![Issues](https://img.shields.io/github/issues/YusufErdemK/zpp)](https://github.com/YusufErdemK/zpp/issues)
