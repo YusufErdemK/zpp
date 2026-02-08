@@ -51,7 +51,7 @@ class zpp {
 
 |  |  |
 |--|--|
-| <img src="assets/code_example.png" width="848"> | <img src="assets/hello_world.png" width="900"> |
+| <img src="assets/code_example.png" width="879"> | <img src="assets/hello_world.png" width="900"> |
 
 
 
