@@ -1,0 +1,21 @@
+class zpp {
+    public:
+        zpp() {
+            kind: 'GUI'
+            version: '1.0'
+        }
+
+        void runMethod() {
+            app.run(@app)
+        }
+    } 
+
+    @app {
+        void run() {
+           
+        }
+
+        void css.style {
+            
+        }
+    }
