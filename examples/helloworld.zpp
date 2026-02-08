@@ -1,0 +1,33 @@
+class zpp {
+    public:
+        zpp() {
+            kind: 'GUI'
+            version: '1.0'
+        }
+
+        void runMethod() {
+            app.run(@app)
+        }
+    }
+
+    @app {
+        void run() {
+           <h1>Hello, World!</h1>
+           app.log('Hello, World!')
+        }
+
+        void css.style {
+           .app {
+                display: flex
+                justify-content: center
+                align-items: center
+                height: 100vh
+                background-color: #f0f0f0
+            }
+
+            h1 {
+                color: #333
+                font-family: Arial, sans-serif
+            }
+        }
+    }
