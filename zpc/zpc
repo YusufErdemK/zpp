@@ -1,0 +1,629 @@
+#!/usr/bin/env python3
+"""
+ZPC - Z++ Compiler
+Zexis OS için Z++ dilini HTML/CSS/JS'e derler
+Version: 1.0.0
+"""
+
+import sys
+import re
+import os
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass
+from enum import Enum
+
+
+class TokenType(Enum):
+    """Token türleri"""
+    CLASS = "class"
+    PUBLIC = "public"
+    VOID = "void"
+    LET = "let"
+    CONST = "const"
+    HTML_TAG = "html_tag"
+    CSS_RULE = "css_rule"
+    JS_STATEMENT = "js_statement"
+    APP_LOG = "app_log"
+    DECORATOR = "decorator"
+
+
+@dataclass
+class Token:
+    """Token veri yapısı"""
+    type: TokenType
+    value: str
+    line: int
+    column: int
+
+
+@dataclass
+class HTMLElement:
+    """HTML elementi veri yapısı"""
+    tag: str
+    attributes: Dict[str, str]
+    content: str
+    children: List['HTMLElement']
+    self_closing: bool = False
+    is_opening: bool = False
+    is_closing: bool = False
+    raw_html: str = ""
+    
+    def to_html(self, indent: int = 1) -> str:
+        """HTML string'e çevir"""
+        if self.raw_html:
+            indent_str = "    " * indent
+            return indent_str + self.raw_html
+        
+        indent_str = "    " * indent
+        
+        # Attribute'ları oluştur
+        attrs = ""
+        if self.attributes:
+            attrs = " " + " ".join([f'{k}="{v}"' for k, v in self.attributes.items()])
+        
+        if self.self_closing:
+            return f"{indent_str}<{self.tag}{attrs} />"
+        else:
+            return f"{indent_str}<{self.tag}{attrs}>{self.content}</{self.tag}>"
+
+
+@dataclass
+class CSSRule:
+    """CSS kuralı veri yapısı"""
+    selector: str
+    properties: Dict[str, str]
+    
+    def to_css(self, indent: int = 2) -> str:
+        """CSS string'e çevir"""
+        indent_str = "    " * indent
+        result = f"{indent_str}{self.selector} {{\n"
+        for prop, value in self.properties.items():
+            result += f"{indent_str}    {prop}: {value};\n"
+        result += f"{indent_str}}}"
+        return result
+
+
+@dataclass
+class JSStatement:
+    """JavaScript ifadesi veri yapısı"""
+    code: str
+    type: str  # 'variable', 'log', 'expression', etc.
+    
+    def to_js(self, indent: int = 2) -> str:
+        """JavaScript string'e çevir"""
+        indent_str = "    " * indent
+        return f"{indent_str}{self.code}"
+
+
+class Lexer:
+    """Lexical analyzer - kodu token'lara ayırır"""
+    
+    def __init__(self, content: str):
+        self.content = content
+        self.position = 0
+        self.line = 1
+        self.column = 1
+        self.tokens: List[Token] = []
+    
+    def tokenize(self) -> List[Token]:
+        """İçeriği token'lara ayır"""
+        return self.tokens
+
+
+class Parser:
+    """Syntax parser - token'ları parse eder"""
+    
+    def __init__(self, content: str):
+        self.content = content
+        self.html_elements: List[HTMLElement] = []
+        self.css_rules: List[CSSRule] = []
+        self.js_statements: List[JSStatement] = []
+        self.errors: List[str] = []
+    
+    def parse(self) -> bool:
+        """Ana parse fonksiyonu"""
+        try:
+            self._extract_run_block()
+            self._extract_css_block()
+            return len(self.errors) == 0
+        except Exception as e:
+            self.errors.append(f"Parse hatası: {str(e)}")
+            return False
+    
+    def _extract_run_block(self):
+        """void run() bloğunu parse et"""
+        # void run() bloğunu bul
+        run_pattern = r'void\s+run\s*\(\s*\)\s*\{(.*?)\n\s*\}'
+        run_match = re.search(run_pattern, self.content, re.DOTALL)
+        
+        if not run_match:
+            self.errors.append("void run() bloğu bulunamadı")
+            return
+        
+        run_content = run_match.group(1)
+        
+        # Tüm içeriği analiz et
+        self._parse_run_content(run_content)
+    
+    def _parse_run_content(self, content: str):
+        """run() bloğunun içeriğini parse et"""
+        lines = content.split('\n')
+        i = 0
+        current_indent = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            if not stripped:
+                i += 1
+                continue
+            
+            # HTML etiketi mi?
+            if stripped.startswith('<'):
+                # Tek satırlık mı, çok satırlık mı kontrol et
+                if self._is_complete_tag(stripped):
+                    # Tek satırlık etiket
+                    html_elem = self._parse_single_line_html(stripped, i + 1)
+                    if html_elem:
+                        self.html_elements.append(html_elem)
+                else:
+                    # Çok satırlık veya açılış/kapanış etiketi
+                    # Raw HTML olarak ekle
+                    html_elem = HTMLElement(
+                        tag="",
+                        attributes={},
+                        content="",
+                        children=[],
+                        raw_html=stripped
+                    )
+                    self.html_elements.append(html_elem)
+            
+            # JavaScript değişken tanımı mı?
+            elif stripped.startswith(('let ', 'const ', 'var ')):
+                js_stmt = self._parse_js_variable(stripped, i + 1)
+                if js_stmt:
+                    self.js_statements.append(js_stmt)
+            
+            # app.log() çağrısı mı?
+            elif 'app.log(' in stripped:
+                js_stmt = self._parse_app_log(stripped, i + 1)
+                if js_stmt:
+                    self.js_statements.append(js_stmt)
+            
+            # Diğer JavaScript ifadeleri
+            elif any(op in stripped for op in ['=', '+', '-', '*', '/', '(', ')']) and not stripped.startswith('<'):
+                js_stmt = JSStatement(
+                    code=stripped if stripped.endswith(';') else stripped + ';',
+                    type='expression'
+                )
+                self.js_statements.append(js_stmt)
+            
+            i += 1
+    
+    def _is_complete_tag(self, line: str) -> bool:
+        """Etiketin tek satırda tamamlanıp tamamlanmadığını kontrol et"""
+        # <tag>content</tag> veya <tag /> formatında mı?
+        if re.match(r'<[^>]+>.*?</[^>]+>', line):
+            return True
+        if re.match(r'<[^>]+/>', line):
+            return True
+        return False
+    
+    def _parse_single_line_html(self, line: str, line_num: int) -> Optional[HTMLElement]:
+        """Tek satırlık HTML elementini parse et"""
+        # Self-closing tag mı?
+        self_closing_match = re.match(r'<([a-zA-Z0-9]+)([^>]*)/>', line)
+        if self_closing_match:
+            tag = self_closing_match.group(1)
+            attrs_str = self_closing_match.group(2).strip()
+            attrs = self._parse_attributes(attrs_str)
+            return HTMLElement(
+                tag=tag,
+                attributes=attrs,
+                content="",
+                children=[],
+                self_closing=True
+            )
+        
+        # Normal tag
+        normal_match = re.match(r'<([a-zA-Z0-9]+)([^>]*)>(.*?)</\1>', line)
+        if normal_match:
+            tag = normal_match.group(1)
+            attrs_str = normal_match.group(2).strip()
+            content = normal_match.group(3)
+            attrs = self._parse_attributes(attrs_str)
+            return HTMLElement(
+                tag=tag,
+                attributes=attrs,
+                content=content,
+                children=[],
+                self_closing=False
+            )
+        
+        # Parse edemediyse raw HTML olarak döndür
+        return HTMLElement(
+            tag="",
+            attributes={},
+            content="",
+            children=[],
+            raw_html=line
+        )
+    
+    def _parse_attributes(self, attrs_str: str) -> Dict[str, str]:
+        """HTML attribute'larını parse et"""
+        attrs = {}
+        if not attrs_str:
+            return attrs
+        
+        # id="value" veya class="value" formatını bul
+        attr_pattern = r'([a-zA-Z-]+)\s*=\s*["\']([^"\']*)["\']'
+        matches = re.findall(attr_pattern, attrs_str)
+        
+        for attr_name, attr_value in matches:
+            attrs[attr_name] = attr_value
+        
+        return attrs
+    
+    def _parse_js_variable(self, line: str, line_num: int) -> Optional[JSStatement]:
+        """JavaScript değişken tanımını parse et"""
+        # let a = 'value' formatını parse et
+        var_pattern = r'(let|const|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(.+)'
+        match = re.match(var_pattern, line)
+        
+        if match:
+            keyword = match.group(1)
+            var_name = match.group(2)
+            value = match.group(3).strip()
+            
+            # Noktalı virgül yoksa ekle
+            if not value.endswith(';'):
+                value += ';'
+            
+            code = f"{keyword} {var_name} = {value}"
+            return JSStatement(code=code, type='variable')
+        
+        return None
+    
+    def _parse_app_log(self, line: str, line_num: int) -> Optional[JSStatement]:
+        """app.log() çağrısını parse et"""
+        # app.log('message') veya app.log(variable) formatını parse et
+        log_pattern = r"app\.log\((.+?)\)"
+        match = re.search(log_pattern, line)
+        
+        if match:
+            content = match.group(1).strip()
+            
+            # String mi değişken mi?
+            if content.startswith(("'", '"')):
+                # String literal
+                code = f"console.log({content});"
+            else:
+                # Değişken veya ifade
+                code = f"console.log({content});"
+            
+            return JSStatement(code=code, type='log')
+        
+        return None
+    
+    def _extract_css_block(self):
+        """void css.style bloğunu parse et"""
+        # void css.style bloğunu bul
+        css_pattern = r'void\s+css\.style\s*\{(.*?)\n\s*\}\s*\}'
+        css_match = re.search(css_pattern, self.content, re.DOTALL)
+        
+        if not css_match:
+            return
+        
+        css_content = css_match.group(1)
+        
+        # CSS kurallarını parse et
+        self._parse_css_content(css_content)
+    
+    def _parse_css_content(self, css_content: str):
+        """CSS içeriğini parse et"""
+        # Selector { properties } formatını bul
+        # İç içe süslü parantezleri destekle
+        
+        lines = css_content.split('\n')
+        current_selector = None
+        current_properties = {}
+        brace_count = 0
+        
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            
+            # Açılış süslü parantezi var mı?
+            if '{' in stripped:
+                # Selector'ı al
+                selector = stripped.split('{')[0].strip()
+                if selector:
+                    current_selector = selector
+                    current_properties = {}
+                brace_count += stripped.count('{')
+            
+            # Kapanış süslü parantezi var mı?
+            if '}' in stripped:
+                brace_count -= stripped.count('}')
+                if brace_count == 0 and current_selector:
+                    # CSS kuralını kaydet
+                    if current_properties:
+                        css_rule = CSSRule(
+                            selector=current_selector,
+                            properties=current_properties.copy()
+                        )
+                        self.css_rules.append(css_rule)
+                    current_selector = None
+                    current_properties = {}
+            
+            # Property satırı mı?
+            if ':' in stripped and '{' not in stripped and '}' not in stripped:
+                parts = stripped.split(':', 1)
+                if len(parts) == 2:
+                    prop_name = parts[0].strip()
+                    prop_value = parts[1].strip().rstrip(';')
+                    if current_selector:
+                        current_properties[prop_name] = prop_value
+
+
+class CodeGenerator:
+    """HTML/CSS/JS kod üreteci"""
+    
+    def __init__(self, parser: Parser):
+        self.parser = parser
+        self.html_output = ""
+    
+    def generate(self) -> str:
+        """Final HTML çıktısını oluştur"""
+        html = []
+        
+        # DOCTYPE ve HTML başlangıç
+        html.append("<!DOCTYPE html>")
+        html.append('<html lang="tr">')
+        html.append("<head>")
+        html.append('    <meta charset="UTF-8">')
+        html.append('    <meta name="viewport" content="width=device-width, initial-scale=1.0">')
+        html.append("    <title>Z++ App</title>")
+        
+        # CSS ekle
+        if self.parser.css_rules:
+            html.append("    <style>")
+            for rule in self.parser.css_rules:
+                html.append(rule.to_css(indent=2))
+            html.append("    </style>")
+        
+        html.append("</head>")
+        html.append('<body class="app">')
+        
+        # HTML elementlerini ekle
+        for element in self.parser.html_elements:
+            html.append(element.to_html(indent=1))
+        
+        # JavaScript ekle
+        if self.parser.js_statements:
+            html.append("")
+            html.append("    <script>")
+            for stmt in self.parser.js_statements:
+                html.append(stmt.to_js(indent=2))
+            html.append("    </script>")
+        
+        html.append("</body>")
+        html.append("</html>")
+        
+        self.html_output = "\n".join(html)
+        return self.html_output
+
+
+class ZppCompiler:
+    """Ana derleyici sınıfı"""
+    
+    def __init__(self, source_file: str):
+        self.source_file = source_file
+        self.source_code = ""
+        self.parser: Optional[Parser] = None
+        self.generator: Optional[CodeGenerator] = None
+        self.output_file = ""
+        self.errors: List[str] = []
+        self.warnings: List[str] = []
+    
+    def compile(self) -> bool:
+        """Derleme sürecini başlat"""
+        # 1. Dosyayı oku
+        if not self._read_source():
+            return False
+        
+        # 2. Sözdizimi kontrolü
+        if not self._validate_syntax():
+            return False
+        
+        # 3. Parse et
+        if not self._parse():
+            return False
+        
+        # 4. Kod üret
+        if not self._generate_code():
+            return False
+        
+        # 5. Dosyaya yaz
+        if not self._write_output():
+            return False
+        
+        return True
+    
+    def _read_source(self) -> bool:
+        """Kaynak dosyayı oku"""
+        try:
+            with open(self.source_file, 'r', encoding='utf-8') as f:
+                self.source_code = f.read()
+            return True
+        except FileNotFoundError:
+            self.errors.append(f"Dosya bulunamadı: {self.source_file}")
+            return False
+        except Exception as e:
+            self.errors.append(f"Dosya okuma hatası: {str(e)}")
+            return False
+    
+    def _validate_syntax(self) -> bool:
+        """Temel sözdizimi kontrolü"""
+        required_patterns = [
+            (r'class\s+zpp\s*\{', "class zpp tanımı bulunamadı"),
+            (r'@app\s*\{', "@app bloğu bulunamadı"),
+            (r'void\s+run\s*\(\s*\)\s*\{', "void run() metodu bulunamadı"),
+        ]
+        
+        for pattern, error_msg in required_patterns:
+            if not re.search(pattern, self.source_code):
+                self.errors.append(f"Sözdizimi hatası: {error_msg}")
+                return False
+        
+        # Süslü parantez dengesi kontrolü
+        open_braces = self.source_code.count('{')
+        close_braces = self.source_code.count('}')
+        
+        if open_braces != close_braces:
+            self.warnings.append(f"Süslü parantez dengesi: {open_braces} açılış, {close_braces} kapanış")
+        
+        return True
+    
+    def _parse(self) -> bool:
+        """Kaynak kodu parse et"""
+        self.parser = Parser(self.source_code)
+        success = self.parser.parse()
+        
+        if not success:
+            self.errors.extend(self.parser.errors)
+            return False
+        
+        return True
+    
+    def _generate_code(self) -> bool:
+        """Kod üret"""
+        if not self.parser:
+            self.errors.append("Parser başlatılmamış")
+            return False
+        
+        self.generator = CodeGenerator(self.parser)
+        try:
+            self.generator.generate()
+            return True
+        except Exception as e:
+            self.errors.append(f"Kod üretim hatası: {str(e)}")
+            return False
+    
+    def _write_output(self) -> bool:
+        """Çıktı dosyasını yaz"""
+        if not self.generator:
+            self.errors.append("Kod üreteci başlatılmamış")
+            return False
+        
+        self.output_file = self.source_file.replace('.zpp', '.html')
+        
+        try:
+            with open(self.output_file, 'w', encoding='utf-8') as f:
+                f.write(self.generator.html_output)
+            return True
+        except Exception as e:
+            self.errors.append(f"Dosya yazma hatası: {str(e)}")
+            return False
+    
+    def print_stats(self):
+        """Derleme istatistiklerini yazdır"""
+        if not self.parser:
+            return
+        
+        print(f"\n📊 Derleme İstatistikleri:")
+        print(f"   HTML Elementleri: {len(self.parser.html_elements)}")
+        print(f"   CSS Kuralları: {len(self.parser.css_rules)}")
+        print(f"   JavaScript İfadeleri: {len(self.parser.js_statements)}")
+        
+        if self.warnings:
+            print(f"\n⚠️  {len(self.warnings)} Uyarı:")
+            for warning in self.warnings:
+                print(f"   - {warning}")
+
+
+def print_banner():
+    """Başlık banner'ı yazdır"""
+    banner = """
+╔══════════════════════════════════════╗
+║      ZPC - Z++ Compiler v1.0.0       ║
+║    Zexis OS Development Tool         ║
+╚══════════════════════════════════════╝
+"""
+    print(banner)
+
+
+def print_usage():
+    """Kullanım bilgisi"""
+    usage = """
+Kullanım:
+    zpc <dosya.zpp>              Tek dosya derle
+    zpc <dosya.zpp> -v           Detaylı çıktı ile derle
+    zpc --help                   Bu yardım mesajını göster
+    zpc --version                Versiyon bilgisi
+
+Örnekler:
+    zpc app.zpp                  app.zpp dosyasını derler
+    zpc myproject.zpp -v         Detaylı mod ile derler
+"""
+    print(usage)
+
+
+def main():
+    """Ana fonksiyon"""
+    # Argüman kontrolü
+    if len(sys.argv) < 2:
+        print_banner()
+        print("❌ Hata: Dosya belirtilmedi!\n")
+        print_usage()
+        sys.exit(1)
+    
+    # Yardım
+    if sys.argv[1] in ['--help', '-h']:
+        print_banner()
+        print_usage()
+        sys.exit(0)
+    
+    # Versiyon
+    if sys.argv[1] in ['--version', '-v']:
+        print_banner()
+        sys.exit(0)
+    
+    input_file = sys.argv[1]
+    verbose = '-v' in sys.argv or '--verbose' in sys.argv
+    
+    # Dosya kontrolü
+    if not os.path.exists(input_file):
+        print(f"❌ Hata: '{input_file}' dosyası bulunamadı!")
+        sys.exit(1)
+    
+    if not input_file.endswith('.zpp'):
+        print("❌ Hata: Sadece .zpp dosyaları derlenebilir!")
+        sys.exit(1)
+    
+    # Banner
+    if verbose:
+        print_banner()
+    
+    print(f"🔧 Derleniyor: {input_file}")
+    
+    # Derle
+    compiler = ZppCompiler(input_file)
+    success = compiler.compile()
+    
+    # Sonuçları göster
+    if success:
+        print(f"✅ Derleme başarılı: {compiler.output_file}")
+        if verbose:
+            compiler.print_stats()
+    else:
+        print(f"\n❌ Derleme başarısız! {len(compiler.errors)} hata bulundu:\n")
+        for i, error in enumerate(compiler.errors, 1):
+            print(f"   {i}. {error}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
