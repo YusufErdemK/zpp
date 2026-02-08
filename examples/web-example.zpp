@@ -1,0 +1,41 @@
+class zpp {
+    public:
+        zpp() {
+            kind: 'GUI'
+            version: '1.0'
+        }
+
+        void runMethod() {
+            app.run(@app)
+        }
+    }
+
+    @app {
+        void run() {
+           <h1>Welcome to ZPP Web Example!</h1>
+           <p>This is a simple web application built using ZPP.</p>
+           app.log('Web example is running!')
+        }
+
+        void css.style {
+           .app {
+                display: flex
+                flex-direction: column
+                justify-content: center
+                align-items: center
+                height: 100vh
+                background-color: #e0f7fa
+            }
+
+            h1 {
+                color: #00796b
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+            }
+
+            p {
+                color: #004d40
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+                font-size: 1.2em
+            }
+        }
+    }
